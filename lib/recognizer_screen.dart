@@ -59,10 +59,11 @@ class _RecognizerScreen extends State<RecognizerScreen> {
     final pngBytes = await img.toByteData(format: ImageByteFormat.png);
 
     Uint8List pngUint8List = pngBytes.buffer.asUint8List(pngBytes.offsetInBytes, pngBytes.lengthInBytes);
-    List<int> pngListInt = pngUint8List.cast<int>();
-
-    im.Image imImage = im.decodeImage(pngListInt);
-    im.Image mnistSize = im.copyResize(imImage, width: 28, height: 28);
+    _predictImage(pngUint8List);
+//    List<int> pngListInt = pngUint8List.cast<int>();
+//
+//    im.Image imImage = im.decodeImage(pngListInt);
+//    im.Image mnistSize = im.copyResize(imImage, width: 28, height: 28);
   }
 
   Future _loadModel() async {
@@ -75,40 +76,13 @@ class _RecognizerScreen extends State<RecognizerScreen> {
     }
   }
 
-  Future _predictImage(File image) async {
-//    if (image == null) return;
-//
-//    switch (_model) {
-//      case yolo:
-//        await yolov2Tiny(image);
-//        break;
-//      case ssd:
-//        await ssdMobileNet(image);
-//        break;
-//      case deeplab:
-//        await segmentMobileNet(image);
-//        break;
-//      case posenet:
-//        await poseNet(image);
-//        break;
-//      default:
-//        await recognizeImage(image);
-//    // await recognizeImageBinary(image);
-//    }
-//
-//    new FileImage(image)
-//        .resolve(new ImageConfiguration())
-//        .addListener(ImageStreamListener((ImageInfo info, bool _) {
-//      setState(() {
-//        _imageHeight = info.image.height.toDouble();
-//        _imageWidth = info.image.width.toDouble();
-//      });
-//    }));
-//
-//    setState(() {
-//      _image = image;
-//      _busy = false;
-//    });
+  Future _predictImage(Uint8List imageBinary) async {
+    var recognitions = await Tflite.runModelOnBinary(
+        binary: imageBinary,
+        numResults: 10,
+    );
+
+    print(recognitions);
   }
 
   @override
