@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' hide Image;
@@ -6,12 +5,22 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as im;
 import 'package:tflite/tflite.dart';
 import 'package:flutter/services.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:number_recognizer/constants.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:simple_permissions/simple_permissions.dart';
 
 final Paint drawingPaint = Paint()
-  ..strokeCap = (Platform.isAndroid) ? StrokeCap.butt : StrokeCap.round
-  ..isAntiAlias = true
-  ..color = Colors.black
-  ..strokeWidth = 7.0;
+  ..strokeCap = StrokeCap.square
+  ..isAntiAlias = kIsAntiAlias
+  ..color = kBrushColor
+  ..strokeWidth = kStrokeWidth;
+
+final Paint whitePaint = Paint()
+  ..strokeCap = StrokeCap.square
+  ..isAntiAlias = kIsAntiAlias
+  ..color = kBrushWhite
+  ..strokeWidth = kStrokeWidth;
 
 class RecognizerScreen extends StatefulWidget {
   RecognizerScreen({Key key, this.title}) : super(key: key);
@@ -23,73 +32,163 @@ class RecognizerScreen extends StatefulWidget {
 }
 
 class _RecognizerScreen extends State<RecognizerScreen> {
-
-  final String calculatingString = 'Calculating...';
-  final String waitingForInputTopString = 'Please draw a number in the box below';
-  final String waitingForInputBottomString = 'Let me guess...';
-  final String guessingInputString = 'The number you draw is';
-
   List<Offset> points = List();
   String mainMessage = '';
   String topMessage = '';
-  String number = '';
+  Uint8List imageBytes;
+  List<BarChartGroupData> items = List();
 
   void _cleanDrawing() {
     setState(() {
-      topMessage = waitingForInputTopString;
-      mainMessage = waitingForInputBottomString;
-      number = '';
+      topMessage = kWaitingForInputTopString;
+      mainMessage = kWaitingForInputBottomString;
       points = List();
     });
   }
 
-  void saveToImage(List<Offset> points) async {
+  void processCanvasPoints(List<Offset> points) async {
+    final canvasSizeWithPadding = kCanvasSize + (2 * kCanvasInnerOffset);
+    final canvasOffset = Offset(kCanvasInnerOffset, kCanvasInnerOffset);
     final recorder = PictureRecorder();
-    final canvas = Canvas(recorder,
-        Rect.fromPoints(Offset(0.0, 0.0), Offset(200.0, 200.0)));
+    final canvas = Canvas(
+      recorder,
+      Rect.fromPoints(
+        Offset(0.0, 0.0),
+        Offset(canvasSizeWithPadding, canvasSizeWithPadding),
+      ),
+    );
+
+    final backgroundPaint = Paint();
+
+    backgroundPaint.color = Colors.black;
+    canvas.drawRect(
+        Rect.fromLTWH(0, 0, canvasSizeWithPadding, canvasSizeWithPadding),
+        backgroundPaint);
 
     for (int i = 0; i < points.length - 1; i++) {
       if (points[i] != null && points[i + 1] != null) {
-        canvas.drawLine(points[i], points[i + 1], drawingPaint);
+        canvas.drawLine(
+            points[i] + canvasOffset, points[i + 1] + canvasOffset, whitePaint);
       }
     }
 
     final picture = recorder.endRecording();
-    final img = picture.toImage(200, 200);
-    final pngBytes = await img.toByteData(format: ImageByteFormat.png);
+    final img = await picture.toImage(
+        canvasSizeWithPadding.toInt(), canvasSizeWithPadding.toInt());
+    final imgBytes = await img.toByteData(format: ImageByteFormat.png);
+    Uint8List pngUint8List = imgBytes.buffer.asUint8List();
 
-    Uint8List pngUint8List = pngBytes.buffer.asUint8List(pngBytes.offsetInBytes, pngBytes.lengthInBytes);
-    _predictImage(pngUint8List);
 //    List<int> pngListInt = pngUint8List.cast<int>();
-//
-//    im.Image imImage = im.decodeImage(pngListInt);
-//    im.Image mnistSize = im.copyResize(imImage, width: 28, height: 28);
+//    final result = await ImageGallerySaver.save(pngUint8List);
+
+    im.Image imImage = im.decodeImage(pngUint8List);
+    im.Image resizedImage = im.copyResize(
+      imImage,
+      width: kModelInputSize,
+      height: kModelInputSize,
+    );
+    await ImageGallerySaver.save(im.encodePng(resizedImage));
+    _predictImage(resizedImage);
+  }
+
+  Uint8List imageToByteListFloat32(im.Image image, int inputSize) {
+    var convertedBytes = Float32List(inputSize * inputSize);
+    var buffer = Float32List.view(convertedBytes.buffer);
+    int pixelIndex = 0;
+    for (var i = 0; i < inputSize; i++) {
+      for (var j = 0; j < inputSize; j++) {
+        var pixel = image.getPixel(j, i);
+        buffer[pixelIndex++] =
+            (im.getRed(pixel) + im.getGreen(pixel) + im.getBlue(pixel)) /
+                3 /
+                255.0;
+      }
+    }
+    return convertedBytes.buffer.asUint8List();
+  }
+
+  double convertPixel(int color) {
+    return (255 -
+            (((color >> 16) & 0xFF) * 0.299 +
+                ((color >> 8) & 0xFF) * 0.587 +
+                (color & 0xFF) * 0.114)) /
+        255.0;
   }
 
   Future _loadModel() async {
     Tflite.close();
     try {
-      String res = await Tflite.loadModel(model: "assets/converted_mnist_model.tflite",);
-      print(res);
+      await Tflite.loadModel(
+        model: "assets/converted_mnist_model.tflite",
+        labels: "assets/labels.txt",
+      );
     } on PlatformException {
       print('Failed to load model.');
     }
   }
 
-  Future _predictImage(Uint8List imageBinary) async {
+  Future _predictImage(im.Image image) async {
     var recognitions = await Tflite.runModelOnBinary(
-        binary: imageBinary,
-        numResults: 10,
+      binary: imageToByteListFloat32(image, kModelInputSize),
     );
 
-    print(recognitions);
+    final predictedLabel = recognitions.first['label'];
+    setState(() {
+      mainMessage = predictedLabel;
+      _buildBarChartInfo(recognitions: recognitions);
+    });
   }
+
+  void _requestStoragePermission() async {
+    final permission = Permission.WriteExternalStorage;
+    bool permissionAlreadyGranted =
+        await SimplePermissions.checkPermission(permission);
+    print("permission is " + permissionAlreadyGranted.toString());
+    if (!permissionAlreadyGranted) {
+      final res = await SimplePermissions.requestPermission(permission);
+      print("permission request result is " + res.toString());
+    }
+  }
+
+  BarChartGroupData _makeGroupData(int x, double y) {
+    return BarChartGroupData(x: x, barRods: [
+      BarChartRodData(
+        y: y,
+        color: kBarColor,
+        width: kChartBarWidth,
+        isRound: true,
+        backDrawRodData: BackgroundBarChartRodData(
+          show: true,
+          y: 1,
+          color: kBarBackgroundColor,
+        ),
+      ),
+    ]);
+  }
+
+  void _buildBarChartInfo({List recognitions= const []}) {
+    items = List();
+    for( var i = 0 ; i<10 ; i++ ) {
+      var barGroup = _makeGroupData(i, 0);
+      items.add(barGroup);
+    }
+    print(recognitions);
+    for (var recognition in recognitions) {
+
+      final idx = recognition["index"];
+      final confidence = recognition["confidence"];
+      items[idx] = _makeGroupData(idx, confidence);
+    }
+  }
+
 
   @override
   void initState() {
     super.initState();
     _loadModel();
     _cleanDrawing();
+    _requestStoragePermission();
+    _buildBarChartInfo();
   }
 
   @override
@@ -119,88 +218,117 @@ class _RecognizerScreen extends State<RecognizerScreen> {
           Expanded(
             child: Container(
               child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: AspectRatio(
-                    aspectRatio: 1.0,
-                    child: Container(
-                      decoration: new BoxDecoration(
-                        border: new Border.all(
-                          width: 3.0,
-                          color: Colors.black,
-                        ),
+                child: SizedBox(
+                  width: kCanvasSize,
+                  height: kCanvasSize,
+                  child: Container(
+                    decoration: new BoxDecoration(
+                      border: new Border.all(
+                        width: 3.0,
+                        color: Colors.blue,
                       ),
-                      child: Builder(
-                        builder: (BuildContext context) {
-                          return GestureDetector(
-                            onPanUpdate: (details) {
-                              setState(() {
-                                RenderBox renderBox =
-                                    context.findRenderObject();
-                                points.add(renderBox
-                                    .globalToLocal(details.globalPosition));
-                              });
-                            },
-                            onPanStart: (details) {
-                              setState(() {
-                                RenderBox renderBox =
-                                    context.findRenderObject();
-                                points.add(renderBox
-                                    .globalToLocal(details.globalPosition));
-                              });
-                            },
-                            onPanEnd: (details) {
-                              setState(() {
-                                points.add(null);
-                                saveToImage(points);
-                                // ToDo: Trigger calculation
-//                                final picture = recorder.endRecording();
-//                                final img = picture.toImage(200, 200);
-//                                final pngBytes = await img.toByteData(format: new ui.EncodingFormat.png());
-//                                new Image.memory(new Uint8List.view(imgBytes.buffer));
-
-                              });
-                            },
-                            child: ClipRect(
-                              child: CustomPaint(
-                                size: Size.infinite,
-                                painter: DrawingPainter(
-                                  offsetPoints: points,
-                                ),
+                    ),
+                    child: Builder(
+                      builder: (BuildContext context) {
+                        return GestureDetector(
+                          onPanUpdate: (details) {
+                            setState(() {
+                              RenderBox renderBox = context.findRenderObject();
+                              points.add(renderBox
+                                  .globalToLocal(details.globalPosition));
+                            });
+                          },
+                          onPanStart: (details) {
+                            setState(() {
+                              RenderBox renderBox = context.findRenderObject();
+                              points.add(renderBox
+                                  .globalToLocal(details.globalPosition));
+                            });
+                          },
+                          onPanEnd: (details) {
+                            setState(() {
+                              points.add(null);
+                              processCanvasPoints(points);
+                            });
+                          },
+                          child: ClipRect(
+                            child: CustomPaint(
+                              size: Size(kCanvasSize, kCanvasSize),
+                              painter: DrawingPainter(
+                                offsetPoints: points,
                               ),
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),
               ),
             ),
-            flex: 6,
+            flex: 4,
           ),
           Expanded(
             child: Container(
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.max,
                 children: <Widget>[
-                  Text(
-                    mainMessage,
-                    style: Theme.of(context).textTheme.headline,
+                  Center(
+                    child: Text(
+                      mainMessage,
+                      style: Theme.of(context).textTheme.headline,
+                    ),
                   ),
-                  Text(
-                    number,
-                    style: Theme.of(context).textTheme.display1,
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(32, 32, 32, 16),
+                      child: FlChart(
+                        chart: BarChart(
+                          BarChartData(
+                            titlesData: FlTitlesData(
+                              show: true,
+                              bottomTitles: SideTitles(
+                                  showTitles: true,
+                                  textStyle: TextStyle(
+                                      color: Colors.black,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14),
+                                  margin: 6,
+                                  getTitles: (double value) {
+                                    return value.toInt().toString();
+                                  }),
+                              leftTitles: SideTitles(
+                                showTitles: false,
+                              ),
+                            ),
+                            borderData: FlBorderData(
+                              show: false,
+                            ),
+                            barGroups: items,
+                            // read about it in the below section
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-            flex: 1,
+            flex: 2,
           ),
+          Expanded(
+            child: Container(),
+            flex: 1,
+          )
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _cleanDrawing,
+        onPressed: () {
+          _cleanDrawing();
+          _buildBarChartInfo();
+        },
         tooltip: 'Clean',
         child: Icon(Icons.delete),
       ), // This trailing comma makes auto-formatting nicer for build methods.
@@ -209,8 +337,6 @@ class _RecognizerScreen extends State<RecognizerScreen> {
 }
 
 class DrawingPainter extends CustomPainter {
-
-
   DrawingPainter({this.offsetPoints});
   List<Offset> offsetPoints;
 

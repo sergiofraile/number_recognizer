@@ -12,6 +12,9 @@ dependencies:
   cupertino_icons: ^0.1.2
   tflite: ^1.0.4
   image: ^2.1.4
+  image_gallery_saver: ^1.1.0
+  simple_permissions: ^0.1.9
+  fl_chart: ^0.2.2
 
 dev_dependencies:
   flutter_test:
@@ -22,6 +25,7 @@ flutter:
 
   assets:
    - assets/converted_mnist_model.tflite
+   - assets/labels.txt
   #  - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
