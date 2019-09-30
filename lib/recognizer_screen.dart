@@ -7,8 +7,8 @@ import 'package:tflite/tflite.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:number_recognizer/constants.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
-import 'package:simple_permissions/simple_permissions.dart';
+//import 'package:image_gallery_saver/image_gallery_saver.dart';
+//import 'package:simple_permissions/simple_permissions.dart';
 
 final Paint drawingPaint = Paint()
   ..strokeCap = StrokeCap.square
@@ -87,7 +87,7 @@ class _RecognizerScreen extends State<RecognizerScreen> {
       width: kModelInputSize,
       height: kModelInputSize,
     );
-    await ImageGallerySaver.save(im.encodePng(resizedImage));
+//    await ImageGallerySaver.saveImage(im.encodePng(resizedImage));
     _predictImage(resizedImage);
   }
 
@@ -139,16 +139,16 @@ class _RecognizerScreen extends State<RecognizerScreen> {
     });
   }
 
-  void _requestStoragePermission() async {
-    final permission = Permission.WriteExternalStorage;
-    bool permissionAlreadyGranted =
-        await SimplePermissions.checkPermission(permission);
-    print("permission is " + permissionAlreadyGranted.toString());
-    if (!permissionAlreadyGranted) {
-      final res = await SimplePermissions.requestPermission(permission);
-      print("permission request result is " + res.toString());
-    }
-  }
+//  void _requestStoragePermission() async {
+//    final permission = Permission.WriteExternalStorage;
+//    bool permissionAlreadyGranted =
+//        await SimplePermissions.checkPermission(permission);
+//    print("permission is " + permissionAlreadyGranted.toString());
+//    if (!permissionAlreadyGranted) {
+//      final res = await SimplePermissions.requestPermission(permission);
+//      print("permission request result is " + res.toString());
+//    }
+//  }
 
   BarChartGroupData _makeGroupData(int x, double y) {
     return BarChartGroupData(x: x, barRods: [
@@ -176,8 +176,10 @@ class _RecognizerScreen extends State<RecognizerScreen> {
     for (var recognition in recognitions) {
 
       final idx = recognition["index"];
-      final confidence = recognition["confidence"];
-      items[idx] = _makeGroupData(idx, confidence);
+      if (0 <= idx && idx <= 9) {
+        final confidence = recognition["confidence"];
+        items[idx] = _makeGroupData(idx, confidence);
+      }
     }
   }
 
@@ -187,7 +189,7 @@ class _RecognizerScreen extends State<RecognizerScreen> {
     super.initState();
     _loadModel();
     _cleanDrawing();
-    _requestStoragePermission();
+//    _requestStoragePermission();
     _buildBarChartInfo();
   }
 
